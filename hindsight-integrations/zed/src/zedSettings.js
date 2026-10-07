@@ -1,8 +1,8 @@
 /**
  * Wire Hindsight into Zed's MCP `context_servers` block.
  *
- * Zed has no native HTTP-MCP transport yet, so we connect to Hindsight's HTTP MCP
- * endpoint through the `mcp-remote` stdio bridge (run via `npx`). The server is
+ * Zed supports native HTTP-MCP transport, so we connect directly to Hindsight's
+ * endpoint without launching an `mcp-remote` stdio bridge. The server is
  * registered under `context_servers.hindsight` in Zed's `settings.json`.
  *
  * Zed's `settings.json` is JSONC (it allows comments and trailing commas), which
@@ -33,16 +33,16 @@ export function mcpEndpointUrl(apiUrl, bankId) {
 /**
  * Build the `context_servers.hindsight` entry for Zed's settings.
  *
- * Returns the Zed settings JSON object for the server: an `mcp-remote` bridge to
+ * Returns the Zed settings JSON object for a native HTTP connection to
  * the Hindsight MCP endpoint, with a Bearer auth header when a token is set
  * (omitted for an open self-hosted server).
  */
 export function buildContextServer(apiUrl, apiToken, bankId) {
-  const args = ["-y", "mcp-remote", mcpEndpointUrl(apiUrl, bankId)];
+  const server = { url: mcpEndpointUrl(apiUrl, bankId) };
   if (apiToken) {
-    args.push("--header", `Authorization: Bearer ${apiToken}`);
+    server.headers = { Authorization: `Bearer ${apiToken}` };
   }
-  return { source: "custom", command: "npx", args };
+  return server;
 }
 
 /** Render the settings snippet the user can paste into `settings.json`. */

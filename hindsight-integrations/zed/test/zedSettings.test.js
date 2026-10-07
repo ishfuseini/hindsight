@@ -26,22 +26,16 @@ test("mcpEndpointUrl builds a bank-scoped MCP path", () => {
   assert.equal(mcpEndpointUrl("http://localhost:8888/", "proj"), "http://localhost:8888/mcp/proj/");
 });
 
-test("buildContextServer runs npx mcp-remote, with a header only when a token is set", () => {
-  const withToken = buildContextServer("https://api.hindsight.vectorize.io", "secret", "zed");
-  assert.deepEqual(withToken, {
-    source: "custom",
-    command: "npx",
-    args: [
-      "-y",
-      "mcp-remote",
-      "https://api.hindsight.vectorize.io/mcp/zed/",
-      "--header",
-      "Authorization: Bearer secret",
-    ],
+test("buildContextServer uses native HTTP with a header only when a token is set", () => {
+  assert.deepEqual(buildContextServer("https://api.hindsight.vectorize.io", "secret", "zed"), {
+    url: "https://api.hindsight.vectorize.io/mcp/zed/",
+    headers: { Authorization: "Bearer secret" },
   });
-
-  const noToken = buildContextServer("http://localhost:8888", null, "zed");
-  assert.deepEqual(noToken.args, ["-y", "mcp-remote", "http://localhost:8888/mcp/zed/"]);
+  for (const apiUrl of ["http://localhost:8888", "http://memory.example.test"]) {
+    assert.deepEqual(buildContextServer(apiUrl, null, "zed"), {
+      url: `${apiUrl}/mcp/zed/`,
+    });
+  }
 });
 
 test("apply creates, then reports unchanged, then merges", () => {
@@ -60,10 +54,9 @@ test("apply creates, then reports unchanged, then merges", () => {
     const merged = applyToSettings(p, server2);
     assert.equal(merged.action, "merged");
     const data = JSON.parse(readFileSync(p, "utf-8"));
-    assert.ok(
-      data.context_servers[SERVER_NAME].args.includes(
-        "https://api.hindsight.vectorize.io/mcp/other-bank/"
-      )
+    assert.equal(
+      data.context_servers[SERVER_NAME].url,
+      "https://api.hindsight.vectorize.io/mcp/other-bank/"
     );
   } finally {
     rmSync(join(p, ".."), { recursive: true, force: true });
@@ -96,7 +89,7 @@ test("JSONC (comments) settings are never rewritten — manual snippet returned"
     const server = buildContextServer("https://api.hindsight.vectorize.io", "tok", "zed");
     const res = applyToSettings(p, server);
     assert.equal(res.action, "manual");
-    assert.ok(res.snippet.includes("mcp-remote"));
+    assert.ok(res.snippet.includes("https://api.hindsight.vectorize.io/mcp/zed/"));
     // File is untouched.
     assert.ok(readFileSync(p, "utf-8").includes("// user comment"));
   } finally {
@@ -114,6 +107,34 @@ test("remove deletes our entry and drops an empty context_servers", () => {
     const data = JSON.parse(readFileSync(p, "utf-8"));
     assert.ok(!("context_servers" in data));
     assert.equal(isInstalled(p), false);
+  } finally {
+    rmSync(join(p, ".."), { recursive: true, force: true });
+  }
+});
+
+test("apply replaces an existing stdio bridge while preserving other servers", () => {
+  const p = tmpPath();
+  try {
+    writeFileSync(
+      p,
+      JSON.stringify({
+        theme: "dark",
+        context_servers: {
+          hindsight: {
+            command: "npx",
+            args: ["-y", "mcp-remote", "http://memory.example.test/mcp/zed/"],
+          },
+          other: { command: "other-server" },
+        },
+      })
+    );
+    const server = buildContextServer("http://memory.example.test", "tok", "zed");
+    assert.equal(applyToSettings(p, server).action, "merged");
+    const settings = JSON.parse(readFileSync(p, "utf-8"));
+    assert.deepEqual(settings.context_servers.hindsight, server);
+    assert.deepEqual(settings.context_servers.other, { command: "other-server" });
+    assert.equal(settings.theme, "dark");
+    assert.equal(applyToSettings(p, server).action, "unchanged");
   } finally {
     rmSync(join(p, ".."), { recursive: true, force: true });
   }
